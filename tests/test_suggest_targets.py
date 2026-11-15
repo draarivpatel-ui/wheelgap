@@ -2459,8 +2459,8 @@ jobs:
 
 
 def test_setup_python_inside_an_alpine_container_is_refused(tmp_path):
-    # setup-python has no musl builds, so the step can't run in an Alpine image: its Python isn't suggested, and the
-    # image's own Python is the job's.
+    # setup-python has no musl builds, so the step fails in an Alpine image and the job never runs: nothing from it is
+    # suggested.
     workflow(
         tmp_path,
         """\
@@ -2476,11 +2476,10 @@ jobs:
 """,
     )
     found = suggest(tmp_path)
-    assert where(found.targets) == [("musl-aarch64", CI, 4)]
-    assert where(found.pythons) == [("3.13", CI, 4)]
-    assert found.targets[0].musl == "1.2"
+    assert found.targets == []
+    assert found.pythons == []
     assert unreadable(found) == [
-        (CI, 6, "job test: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine")
+        (CI, 4, "job test: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine")
     ]
 
 
@@ -2608,9 +2607,8 @@ def test_container_job_without_runs_on_is_not_read(tmp_path):
 @pytest.mark.parametrize(
     ("runner", "image", "arch", "platform"),
     [
-        ("ubuntu-24.04-arm", "python:3.13-alpine", "x64", "linux/arm64"),
-        ("ubuntu-latest", "python:3.13-alpine", "arm64", "linux/amd64"),
         ("ubuntu-latest", "python:3.12", "x86", "linux/amd64"),
+        ("ubuntu-24.04-arm", "python:3.12-slim", "x64", "linux/arm64"),
     ],
 )
 def test_setup_python_mismatched_architecture_inside_a_container_is_refused(tmp_path, runner, image, arch, platform):
@@ -2630,7 +2628,7 @@ jobs:
     )
     found = suggest(tmp_path)
     assert found.targets == []
-    assert where(found.pythons) == [("3.11", CI, 8), (image.split(":")[1].split("-")[0], CI, 4)]
+    assert where(found.pythons) == [("3.11", CI, 8)]  # setup-python's Python is the job's, not the image's
     assert unreadable(found) == [
         (CI, 4, f"job test: setup-python's architecture: {arch} on container: {image} ({platform}) isn't read")
     ]
@@ -2671,15 +2669,16 @@ jobs:
     )
     found = suggest(tmp_path)
     assert found.targets == []
-    assert [f.value for f in found.pythons] == ["3.11", "3.13", "3.11", "3.13", "3.14", "3.12"]
+    # The Alpine jobs can't run setup-python at all; the slim job's Python is setup-uv's, not the image's.
+    assert [f.value for f in found.pythons] == ["3.14"]
     assert unreadable(found) == [
-        (CI, 11, "job expr: architecture: ${{ inputs.arch }} isn't read, so the job's target isn't read"),
-        (CI, 19, "job alias: architecture: *a isn't read, so the job's target isn't read"),
+        (CI, 6, "job expr: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine"),
+        (CI, 14, "job alias: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine"),
         (CI, 27, "job uv: setup-uv's python-arch: arm64 isn't read, so the job's target isn't read"),
     ]
 
 
-def test_setup_python_matrix_architecture_inside_a_container(tmp_path):
+def test_setup_python_matrix_architecture_inside_an_alpine_container_is_refused(tmp_path):
     workflow(
         tmp_path,
         """\
@@ -2698,11 +2697,10 @@ jobs:
 """,
     )
     found = suggest(tmp_path)
-    assert where(found.targets) == [("musl-aarch64", CI, 7)]
-    assert found.targets[0].musl == "1.2"
-    assert where(found.pythons) == [("3.11", CI, 11), ("3.13", CI, 7)]
+    assert found.targets == []
+    assert found.pythons == []
     assert unreadable(found) == [
-        (CI, 7, "job test: setup-python's architecture: x64 on container: python:3.13-alpine (linux/arm64) isn't read")
+        (CI, 7, "job test: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine")
     ]
 
 

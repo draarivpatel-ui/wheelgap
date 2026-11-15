@@ -1105,11 +1105,10 @@ def _read_job(job: _Node, path: str, out: Suggestions) -> None:
         unsure(_Unsure(e.reason + " (neither its runner nor its Python is read)", e.line))
         return
 
-    if (musl_image := _musl_container(job)) is not None:
-        for setup in setups:
-            if setup.setup_python:
-                unsure(_Unsure(f"setup-python has no musl builds, so it can't install a Python in {musl_image}",
-                               setup.step.line))  # fmt: skip
+    # setup-python has no musl builds, so in an Alpine image its step fails and the job never runs: neither its
+    # Python nor the job's target (nor the image's Python) is suggested; the job is refused below.
+    musl_setup_python = _musl_container(job) is not None and any(s.setup_python for s in setups)
+    if musl_setup_python:
         setups = [s for s in setups if not s.setup_python]
     for setup in setups:
         try:
@@ -1125,6 +1124,10 @@ def _read_job(job: _Node, path: str, out: Suggestions) -> None:
             assert container is not None  # the key is present, so _container_image reads it or refuses the job
             image, image_node = container
             _refuse_services(job)
+            if musl_setup_python:
+                raise _Unsure(
+                    f"setup-python has no musl builds, so it can't install a Python in {image}", image_node.line
+                )
             parsed, platform = _container_target(job, image, image_node.line)
             source = f"container: {image}"
             detail, python_source = _image_sources(parsed, source, platform, runner_cpu=True)

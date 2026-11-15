@@ -199,8 +199,10 @@ def oracle(text):
                     inputs = {k.lower(): v for k, v in inputs.items()} if isinstance(inputs, dict) else {}
                     setups.append((action == "actions/setup-python", inputs))
         container = container_image(job)
-        if container is not None and CONTAINERS.get(container, ("",))[0] == "musl":
-            # setup-python has no musl builds, so a setup-python step can't run in an Alpine image.
+        # setup-python has no musl builds: in an Alpine image the step fails and the job never runs, so nothing from
+        # it counts (no target, no Python).
+        blocked = container is not None and CONTAINERS.get(container, ("",))[0] == "musl" and any(p for p, _ in setups)
+        if blocked:
             setups = [(is_python, inputs) for is_python, inputs in setups if not is_python]
         # A step that picks the interpreter puts its Python first on PATH, so the image's own isn't the job's.
         picks = any(is_python or "python-version" in i or "python-arch" in i for is_python, i in setups)
@@ -209,7 +211,7 @@ def oracle(text):
             if "container" in job:
                 # The image is pulled for the runner's CPU. Any `container:` key suppresses runner inference, even
                 # when the container itself can't be read (an expression, extra keys, or an unsupported shape).
-                resolved = container_target(container, label)
+                resolved = None if blocked else container_target(container, label)
                 if resolved is not None:
                     target = resolved[0]
                     if not picks:
@@ -926,14 +928,25 @@ def oracle5(text):
                     w = {k.lower(): v for k, v in w.items()} if isinstance(w, dict) else {}
                     setups.append((a, w))
         container = container5(job)
+        # As in oracle(): setup-python can't run in an Alpine image, so such a job counts for nothing; otherwise a step
+        # that picks the interpreter makes its Python the job's, not the image's.
+        blocked = (
+            container is not None
+            and CONTAINERS.get(container, ("",))[0] == "musl"
+            and any(a.endswith("python") for a, _ in setups)
+        )
+        if blocked:
+            setups = [(a, w) for a, w in setups if not a.endswith("python")]
+        picks = any(a.endswith("python") or "python-version" in w or "python-arch" in w for a, w in setups)
         for combo in combos:
             label = val5(job.get("runs-on"), combo)
             if "container" in job:
                 # As in oracle(): any `container:` key suppresses runner inference, even when its image can't be read.
-                resolved = container_target(container, label)
+                resolved = None if blocked else container_target(container, label)
                 if resolved is not None:
                     tgt = resolved[0]
-                    P.add(resolved[1])
+                    if not picks:
+                        P.add(resolved[1])
                 else:
                     tgt = None
             else:

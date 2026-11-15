@@ -2544,7 +2544,7 @@ jobs:
     assert found.unreadable == []
 
 
-def test_unreadable_container_leaves_no_target_but_keeps_setup_python(tmp_path):
+def test_unreadable_container_leaves_no_target_and_no_setup_python(tmp_path):
     # A container that can't be read leaves no target, and the (otherwise readable) runner isn't half-suggested.
     workflow(
         tmp_path,
@@ -2563,8 +2563,8 @@ jobs:
     )
     found = suggest(tmp_path)
     assert found.targets == []
-    # setup-python's version is still read: it's independent of the platform.
-    assert where(found.pythons) == [("3.12", CI, 10)]
+    # The image may be musl (here it is), where setup-python can't install a Python, so its version isn't suggested.
+    assert found.pythons == []
     assert unreadable(found) == [(CI, 6, "job test: container: options isn't read")]
 
 

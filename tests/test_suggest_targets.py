@@ -2435,7 +2435,32 @@ def test_container_mapping_with_an_image_is_read(tmp_path, container):
 
 
 def test_setup_python_inside_a_container_uses_the_images_libc(tmp_path):
-    # setup-python installs into the container, so its matching architecture resolves against the image's libc.
+    # setup-python installs into the container, so its matching architecture resolves against the image's libc, and
+    # its Python is the job's: the image's own isn't suggested too.
+    workflow(
+        tmp_path,
+        """\
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    container: python:3.13-slim
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          architecture: arm64
+""",
+    )
+    found = suggest(tmp_path)
+    assert where(found.targets) == [("linux-aarch64", CI, 4)]
+    assert where(found.pythons) == [("3.11", CI, 8)]
+    assert found.pythons[0].source == "python-version: 3.11"
+    assert found.unreadable == []
+
+
+def test_setup_python_inside_an_alpine_container_is_refused(tmp_path):
+    # setup-python has no musl builds, so the step can't run in an Alpine image: its Python isn't suggested, and the
+    # image's own Python is the job's.
     workflow(
         tmp_path,
         """\
@@ -2452,14 +2477,14 @@ jobs:
     )
     found = suggest(tmp_path)
     assert where(found.targets) == [("musl-aarch64", CI, 4)]
-    assert where(found.pythons) == [("3.11", CI, 8), ("3.13", CI, 4)]
-    assert found.pythons[0].source == "python-version: 3.11"
+    assert where(found.pythons) == [("3.13", CI, 4)]
     assert found.targets[0].musl == "1.2"
-    assert found.unreadable == []
-    assert found.config() == {"python": ["3.11", "3.13"], "targets": ["musl-aarch64"], "musl": "1.2"}
+    assert unreadable(found) == [
+        (CI, 6, "job test: setup-python has no musl builds, so it can't install a Python in python:3.13-alpine")
+    ]
 
 
-def test_setup_uv_inside_a_container_keeps_both_pythons(tmp_path):
+def test_setup_uv_inside_a_container_picks_the_python(tmp_path):
     workflow(
         tmp_path,
         """\
@@ -2475,7 +2500,7 @@ jobs:
     )
     found = suggest(tmp_path)
     assert where(found.targets) == [("linux-x86_64", CI, 4)]
-    assert where(found.pythons) == [("3.14t", CI, 8), ("3.12", CI, 4)]
+    assert where(found.pythons) == [("3.14t", CI, 8)]  # setup-uv's Python is the job's, not the image's
     assert found.unreadable == []
 
 
@@ -2707,3 +2732,12 @@ def test_container_mapping_with_an_extra_key_is_refused_even_in_flow_form(tmp_pa
     assert targets == []
     assert found.pythons == []
     assert refused == [(4, "job test: container: options isn't read")]
+
+
+def test_a_container_on_ubuntu_slim_is_refused(tmp_path):
+    # ubuntu-slim runs in a container itself and can't run a job container.
+    found = suggest_with(tmp_path, "jobs:\n  test:\n    runs-on: ubuntu-slim\n    container: python:3.13-alpine\n")
+    assert found.targets == []
+    assert unreadable(found) == [
+        (CI, 3, "job test: ubuntu-slim runs in a container itself, so it can't run a job container")
+    ]

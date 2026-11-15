@@ -199,6 +199,11 @@ def oracle(text):
                     inputs = {k.lower(): v for k, v in inputs.items()} if isinstance(inputs, dict) else {}
                     setups.append((action == "actions/setup-python", inputs))
         container = container_image(job)
+        if container is not None and CONTAINERS.get(container, ("",))[0] == "musl":
+            # setup-python has no musl builds, so a setup-python step can't run in an Alpine image.
+            setups = [(is_python, inputs) for is_python, inputs in setups if not is_python]
+        # A step that picks the interpreter puts its Python first on PATH, so the image's own isn't the job's.
+        picks = any(is_python or "python-version" in i or "python-arch" in i for is_python, i in setups)
         for combo in combos:
             label = value(job.get("runs-on"), combo)
             if "container" in job:
@@ -207,7 +212,8 @@ def oracle(text):
                 resolved = container_target(container, label)
                 if resolved is not None:
                     target = resolved[0]
-                    pythons.add(resolved[1])
+                    if not picks:
+                        pythons.add(resolved[1])
                 else:
                     target = None
             else:

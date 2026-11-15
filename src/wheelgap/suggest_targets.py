@@ -1002,9 +1002,26 @@ def _container_platform(job: _Node, image: ImageTarget, line: int) -> str:
         raise _Unsure(f"{text} isn't a GitHub-hosted runner wheelgap knows", label.line)
     if not target.startswith("linux-"):
         raise _Unsure(f"job containers only run on Linux runners, not {text}", label.line)
+    if text.lower() == "ubuntu-slim":
+        raise _Unsure("ubuntu-slim runs in a container itself, so it can't run a job container", label.line)
     if image.platform.startswith("win"):
         raise _Unsure("container: Windows container images aren't supported on GitHub Actions Linux runners", line)
     return _RUNNER_PLATFORM[target]
+
+
+def _musl_container(job: _Node) -> str | None:
+    """The image of a job whose literal `container:` is a musl (Alpine) image, or None (also when it can't be read:
+    _read_job reports that). setup-python has no musl builds, so it can't install a Python in such a job."""
+    try:
+        found = _container_image(job)
+        return found[0] if found is not None and parse_image(found[0]).musl else None
+    except (_Unsure, DockerfileError):
+        return None
+
+
+def _picks_python(setup: _Setup) -> bool:
+    """Whether a setup step picks the job's interpreter (as _job_archs counts it)."""
+    return setup.setup_python or bool({"python-version", "python-arch"} & setup.inputs.keys())
 
 
 def _refuse_services(job: _Node) -> None:
@@ -1032,7 +1049,7 @@ def _container_target(job: _Node, image: str, line: int) -> tuple[ImageTarget, s
 
 def _job_archs(setups: list[_Setup]) -> list[str | None | tuple[str, int]]:
     # Each step that picks an interpreter adds its architecture; a setup-uv step without a Python picks none.
-    pickers = [s for s in setups if s.setup_python or {"python-version", "python-arch"} & s.inputs.keys()]
+    pickers = [s for s in setups if _picks_python(s)]
     archs = list(dict.fromkeys(_arch(s) for s in pickers)) or [None]
     if unread := next((a for a in archs if isinstance(a, _Unsure)), None):
         raise _Unsure(f"{unread.reason}, so the job's target isn't read", unread.line)
@@ -1088,6 +1105,12 @@ def _read_job(job: _Node, path: str, out: Suggestions) -> None:
         unsure(_Unsure(e.reason + " (neither its runner nor its Python is read)", e.line))
         return
 
+    if (musl_image := _musl_container(job)) is not None:
+        for setup in setups:
+            if setup.setup_python:
+                unsure(_Unsure(f"setup-python has no musl builds, so it can't install a Python in {musl_image}",
+                               setup.step.line))  # fmt: skip
+        setups = [s for s in setups if not s.setup_python]
     for setup in setups:
         try:
             _read_python(job, setup, path, out)
@@ -1105,7 +1128,9 @@ def _read_job(job: _Node, path: str, out: Suggestions) -> None:
             parsed, platform = _container_target(job, image, image_node.line)
             source = f"container: {image}"
             detail, python_source = _image_sources(parsed, source, platform, runner_cpu=True)
-            out.pythons.append(Found(parsed.python, path, image_node.line, python_source))
+            if not any(_picks_python(s) for s in setups):
+                # A step that picks the interpreter puts its own Python first on PATH, as on a runner.
+                out.pythons.append(Found(parsed.python, path, image_node.line, python_source))
             archs = _job_archs(setups)
             combos: list[dict[str, _Scalar]] = [{}]
             if any(isinstance(a, tuple) for a in archs):

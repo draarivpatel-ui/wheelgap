@@ -2739,3 +2739,15 @@ def test_a_container_on_ubuntu_slim_is_refused(tmp_path):
     assert unreadable(found) == [
         (CI, 3, "job test: ubuntu-slim runs in a container itself, so it can't run a job container")
     ]
+
+
+def test_setup_python_in_a_container_that_cant_be_read_suggests_nothing(tmp_path):
+    # The image might be musl, where setup-python can't run, so its Python isn't suggested either.
+    found = suggest_with(
+        tmp_path,
+        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    container: ${{ matrix.image }}\n    steps:\n"
+        "      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.11'\n",
+    )
+    assert found.targets == []
+    assert found.pythons == []
+    assert [u.reason for u in found.unreadable] == ["job test: container: ${{ matrix.image }} is an expression"]

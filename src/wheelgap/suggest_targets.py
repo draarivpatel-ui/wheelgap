@@ -1009,14 +1009,19 @@ def _container_platform(job: _Node, image: ImageTarget, line: int) -> str:
     return _RUNNER_PLATFORM[target]
 
 
-def _musl_container(job: _Node) -> str | None:
-    """The image of a job whose literal `container:` is a musl (Alpine) image, or None (also when it can't be read:
-    _read_job reports that). setup-python has no musl builds, so it can't install a Python in such a job."""
+def _container_libc(job: _Node) -> str | None:
+    """ "musl" or "glibc" for a job's readable literal `container:` image, "unknown" for a `container:` whose image
+    can't be read (_read_job reports why), or None for a job without one. setup-python has no musl builds, so it can't
+    install a Python in a musl image, and in an unknown one it may not either."""
+    if "container" not in {c.key for c in job.children}:
+        return None
     try:
         found = _container_image(job)
-        return found[0] if found is not None and parse_image(found[0]).musl else None
+        if found is None:
+            return None
+        return "musl" if parse_image(found[0]).musl else "glibc"
     except (_Unsure, DockerfileError):
-        return None
+        return "unknown"
 
 
 def _picks_python(setup: _Setup) -> bool:
@@ -1107,8 +1112,11 @@ def _read_job(job: _Node, path: str, out: Suggestions) -> None:
 
     # setup-python has no musl builds, so in an Alpine image its step fails and the job never runs: neither its
     # Python nor the job's target (nor the image's Python) is suggested; the job is refused below.
-    musl_setup_python = _musl_container(job) is not None and any(s.setup_python for s in setups)
-    if musl_setup_python:
+    libc = _container_libc(job)
+    musl_setup_python = libc == "musl" and any(s.setup_python for s in setups)
+    if libc in ("musl", "unknown"):
+        # In an image that can't be read, setup-python may fail too (the image may be musl), so its Python isn't
+        # suggested either; the job itself is refused below for its unreadable container.
         setups = [s for s in setups if not s.setup_python]
     for setup in setups:
         try:

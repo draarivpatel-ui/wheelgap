@@ -226,6 +226,16 @@ The snippet combines every job in every workflow, including lint, release and bo
     - setup-python's `freethreaded: true`, which adds the `t` (free-threading starts at 3.13, so `3.12t` is refused).
     - setup-python's `architecture`, where it's certain: `x86` on x64 Windows is `win32`, and `x64` on Apple silicon is
       `macos-x86_64` (Rosetta). It can come from a literal matrix, which pairs each runner with its own architecture.
+    - A job's `container:`, as a literal image string or a mapping (block or `{ image: ... }`) with only an `image:`
+      key. The image is read exactly as `--dockerfile` reads a `FROM`, so `container: python:3.13-alpine` on
+      `ubuntu-latest` suggests `musl-x86_64` and Python 3.13 (and `musl = "1.2"`) rather than the runner's target.
+      Actions pulls the image for the runner's CPU without forcing a platform, so the same image on
+      `ubuntu-24.04-arm` suggests `musl-aarch64` instead; a runner label that can't be resolved (a matrix, an
+      expression or an unknown label), a non-Linux runner (job containers only run on Linux), or a Windows container
+      image isn't guessed. A `setup-python` step inside the container installs into the
+      image, so its Python is suggested too and the image's libc still applies. Expressions, an `options:` that may
+      change the platform, `services:` (at the job level beside `container:`), and any other container shape are
+      listed under "Couldn't read".
     - Input names are case-insensitive, as Actions reads them (`Architecture: x86`). Step keys such as `uses` and `with`
       aren't.
 - **Runner labels.** [GitHub-hosted runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
@@ -237,6 +247,10 @@ The snippet combines every job in every workflow, including lint, release and bo
     - `windows-11-arm` → `win-arm64`.
     - `macos-latest`, `macos-14` and later, `xcode-*` and the `-xlarge` runners → `macos-arm64`.
     - `macos-13`, `macos-15-intel` and the `-large` runners → `macos-x86_64`.
+- **Container images.** A job's literal `container:` image names its own libc and Python, read as a Dockerfile's
+  `FROM` is, so the runner's target isn't read for that job; its CPU is, since Actions pulls the image's build for
+  that CPU (an ARM runner gets `musl-aarch64` from `python:3.13-alpine`). A `setup-python` step inside the container
+  installs into the image, so the image's libc applies to the Python it installs too.
 - **Runner versions.** A pinned label also names its glibc (`ubuntu-22.04` has 2.35, `ubuntu-24.04` 2.39) or its macOS
   version (`macos-14` is 14.0). A `-latest` label moves, so it names neither. `ubuntu-26.04` names none yet: GitHub's
   runner-images readme doesn't give its glibc.
@@ -285,7 +299,8 @@ and never guessed:
 - a job with a setup step whose `uses` can't be read, which sets an input twice, or which picks the Python under an
   `if:` (the step may not run);
 - self-hosted and other unknown runner labels;
-- a job that runs in a `container:`;
+- a `container:` that isn't a single literal image (an expression, an `options:` that may change the platform, or a
+  mapping with any other key), or a job-level `services:` beside it;
 - an unquoted `3.10` (YAML reads it as the number 3.1) or `0x10`;
 - `python-version-file`;
 - Dockerfile templates (`Dockerfile.j2`, `Dockerfile.template`), files or folders it can't open, and Dockerfiles

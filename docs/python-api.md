@@ -79,9 +79,12 @@ lock's files if a lookup fails).
 To count packages that Pyodide ships itself, as `--pyodide-lock` does, pass
 `pyodide_locks=[wheelgap.pyodide.load_pyodide_lock("pyodide-lock.json")]` (a path or https URL, one lock per Python)
 to `check_packages()`, `check_package()` or `check_lockfile()`. They show as `bundled` on pyodide targets for the
-lock's Python, and the result's `bundled_version` is the version Pyodide ships. A different version from your pin or
-range still counts as `bundled` (`ok` stays `True`, as in the CLI), so check `bundled_version_differs`; `to_dict()`
-includes both as `"bundled"` and `"bundled_version_differs"`. A lock that no pyodide target can use raises
+lock's Python. Each result has `bundled_versions`, mapping Python versions (for example, `"3.13"`) to the
+versions Pyodide ships. The backwards-compatible scalar `bundled_version` is set only if all applied locks
+agree; it is `None` if their versions differ. A different bundled version from your pin or range still counts
+as `bundled` (`ok` stays `True`, as in the CLI), so check `bundled_version_differs`. `to_dict()` includes
+`"bundled_versions"` when non-empty and `"bundled_version_differs"` whenever a lock applies; it only includes
+the old `"bundled"` scalar when all applicable versions agree. A lock that no pyodide target can use raises
 `PyodideLockError`, as on the command line.
 
 ## Results
@@ -96,7 +99,7 @@ Each check returns a `Result` (a list of them for `check_packages()` and `check_
 | `files` | the distribution filenames that were checked |
 | `ok` | `True` if no target has a gap |
 | `gaps` | the targets with a gap (`source`, `missing` or `unknown`) |
-| `bundled_version`, `bundled_version_differs` | with `pyodide_locks`: see [Pyodide](#pyodide) |
+| `bundled_versions`, `bundled_version`, `bundled_version_differs` | with `pyodide_locks`: see [Pyodide](#pyodide) |
 | `to_dict()` | the package in the shape of a `--json` package entry, keyed by each target's full label (`"3.13 musl-aarch64"`, with the Python even when only one is checked) |
 
 ### Explaining a gap
